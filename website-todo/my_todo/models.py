@@ -23,5 +23,7 @@ class Task(SQLModel, table=True):
     notes: str
     status: str
     assigned_to: str
+    remaining_time: str = ""
+    time_color: str = "default"
     owner_id: Optional[int] = Field(default=None, foreign_key="user.id")
     owner: Optional[User] = Relationship(back_populates="tasks")

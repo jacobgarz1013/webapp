@@ -2,6 +2,7 @@ import reflex as rx
 from typing import Optional
 from sqlmodel import select
 from .models import User, Task
+from datetime import datetime, timedelta
 
 class Task(rx.Base):
     name: str
@@ -24,6 +25,15 @@ INITIAL_TASKS = {
     "admin": []
 }
 
+# Countdown method
+def countdown_component(remaining: str, color: str):
+    return rx.text(
+        remaining, 
+        color = color,
+        font_weight = "bold",
+        font_size = "sm",  
+        )
+
 import reflex as rx
 from typing import Optional
 from .models import User, Task
@@ -45,6 +55,7 @@ class State(rx.State):
     role_password: str = ""
     role_modal_error: str = ""
     selected_role: str = ""
+    show_logout_option_modal: bool = False
     
     # Edit modal state
     show_edit_modal: bool = False
@@ -112,6 +123,14 @@ class State(rx.State):
         self.is_authenticated = False
         self.current_user = None
         self.error_message = ""
+        self.close_logout_modal()
+        return rx.window_alert("You have been logged out")
+    
+    def show_logout_modal(self):
+        self.show_logout_option_modal = True
+
+    def close_logout_modal(self):
+        self.show_logout_option_modal = False
 
     def set_role(self, role: str):
         """Handle role change."""
@@ -189,6 +208,10 @@ class State(rx.State):
             
         try:
             with rx.session() as session:
+                # Countdown starts during session
+                task_date = form_data.get("date", "")
+                remaining, color = self.calculate_remaining_time(task_date)
+                
                 new_task = Task(
                     name=form_data.get("name", ""),
                     date=form_data.get("date", ""),
@@ -203,6 +226,28 @@ class State(rx.State):
                 self.current_user = session.exec(select(User).where(User.id == self.current_user.id)).first()
         except Exception as e:
             print(f"Error adding task: {str(e)}")
+            
+    def calculate_remaining_time(self, task_date: str) -> tuple[str, str]:
+        """Calculate remaining time for a task."""  
+        try:
+            now = datetime.now()
+            due_date = datetime.strptime(task_date, "%Y-%m-%d")
+            delta = due_date - now
+            total_minutes = int(delta.total_seconds() / 60)
+            
+            if total_minutes <= 0:
+                return ("Due", "red")
+            elif total_minutes < 1440:
+                hours = total_minutes // 60
+                minutes = total_minutes % 60
+                return (f"{hours}h {minutes}m", "red")
+            else:
+                days = delta.days 
+                hours = (delta.seconds // 3600)
+                minutes = (delta.seconds % 3600) // 60
+                return (f"{days}d {hours}h {minutes}m", "default")
+        except:
+            return ("Invalid date", "gray")              
 
     @rx.var
     def current_tasks(self) -> list[Task]:
@@ -212,6 +257,10 @@ class State(rx.State):
         try:
             with rx.session() as session:
                 tasks = session.exec(select(Task).where(Task.owner_id == self.current_user.id)).all()
+                for task in tasks:
+                    remaining, color = self.calculate_remaining_time(task.date)
+                    task.remaining_time = remaining
+                    task.time_color = color
                 return tasks
         except Exception as e:
             print(f"Error getting tasks: {str(e)}")
@@ -477,6 +526,14 @@ def show_item(task: Task):
                 status_badge("Not Started"),
             )
         ),
+        rx.table.cell(
+            rx.vstack(
+                rx.text(task.date),
+                countdown_component(task.remaining_time, task.time_color),
+                spacing = "1",
+                align_items = "start"
+            )
+        ),
         rx.table.cell(task.assigned_to),
         rx.table.cell(
             rx.hstack(
@@ -617,7 +674,7 @@ def login_form():
                         size="3",
                         width="100%",
                     ),
-                    #rx.text("or", align_self="center", color="black"),
+                    #rx.text("or", align_self="center"),
                     rx.button(
                         "Create New Group",
                         color_scheme="blue",
@@ -633,7 +690,7 @@ def login_form():
             style={
             "width":"400px",
             "padding":"3em",
-            "border" : "5px solid blue",
+            "border" : "5px solid black",
             "border_radius" :"lg",
             "background":"white",
             "box_shadow":"lg"},
@@ -641,8 +698,38 @@ def login_form():
         width="100%",
         height="100vh",
         background_color="#8994bd",
-        align_items="center",
+        align_items="center"
     )
+
+#Gives log out warning
+def logout_option_modal():
+        return rx.cond(
+            State.show_logout_option_modal,
+            rx.center(
+                rx.box(
+                    rx.vstack(
+                        rx.heading("Are you sure you want to log out?", size="5", text_align="center"),
+                        rx.hstack(
+                            rx.button("Yes", color_scheme="green", on_click=State.logout),
+                            rx.button("No", color_scheme="red", on_click=State.close_logout_modal),
+                            spacing="5",
+                            justify="center"
+                        ),
+                        spacing="2",
+                        align="center"
+                    ),
+                    width="300px",
+                    padding="1.5em",
+                    bg=rx.color_mode_cond("white", "black"),
+                    border_radius="lg",
+                    box_shadow="lg",
+                    border=("2px solid"),
+                    border_color=rx.color_mode_cond("black", "white"),
+                ),
+                width="100%"
+            ),
+            rx.box(),
+        )
 
 def navbar():
     return rx.flex(
@@ -674,7 +761,7 @@ def navbar():
                 "Logout",
                 color_scheme="red",
                 size="2",
-                on_click=State.logout,
+                on_click=State.show_logout_modal,
             ),
             spacing="6",  # More space between color mode group and Logout
             align="center",
@@ -790,24 +877,31 @@ def dashboard():
             add_item_form(),
             rx.text("You do not have permission to assign or delete tasks.", color="red", padding_x = "2em"),
         ),
-        rx.table.root(
-            rx.table.header(
-                rx.table.row(
-                    rx.table.column_header_cell(rx.icon("clipboard-list"),"Task"),
-                    rx.table.column_header_cell(rx.icon("calendar-1"),"Date"),
-                    rx.table.column_header_cell(rx.icon("notebook-pen"),"Notes"),
-                    rx.table.column_header_cell(rx.icon("circle-help"),"Status"),
-                    rx.table.column_header_cell(rx.icon("users"),"Assigned To"),
-                    rx.table.column_header_cell(rx.icon("cog"),"Actions"),
+        rx.box(
+            rx.table.root(
+                rx.table.header(
+                    rx.table.row(
+                        rx.table.column_header_cell(rx.icon("clipboard-list"),"Task"),
+                        rx.table.column_header_cell(rx.icon("calendar-1"),"Date"),
+                        rx.table.column_header_cell(rx.icon("notebook-pen"),"Notes"),
+                        rx.table.column_header_cell(rx.icon("circle-help"),"Status"),
+                        rx.table.column_header_cell(rx.icon("users"),"Assigned To"),
+                        rx.table.column_header_cell(rx.icon("cog"),"Actions"),
+                    ),
                 ),
+                rx.table.body(
+                    rx.foreach(State.current_tasks, show_item),
+                ),
+                width="100%",
             ),
-            rx.table.body(
-                rx.foreach(State.current_tasks, show_item),
-            ),
-            width="100%",
+            width="80%",
+            margin_x="auto",
+            border="3px solid blue",
+            border_radius = "10px"
         ),
         role_modal(),
         edit_modal(),
+        logout_option_modal()
     )
 
 def index():
