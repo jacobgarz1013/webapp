@@ -515,7 +515,14 @@ def role_modal():
 def show_item(task: Task):
     return rx.table.row(
         rx.table.cell(task.name),
-        rx.table.cell(task.date),
+        rx.table.cell(
+            rx.vstack(
+                rx.text(task.date),
+                countdown_component(task.remaining_time, task.time_color),
+                spacing="1",
+                align_items="start"
+            )
+        ),
         rx.table.cell(task.notes),
         rx.table.cell(
             rx.match(
@@ -524,14 +531,6 @@ def show_item(task: Task):
                 ("In Progress", status_badge("In Progress")),
                 ("Not Started", status_badge("Not Started")),
                 status_badge("Not Started"),
-            )
-        ),
-        rx.table.cell(
-            rx.vstack(
-                rx.text(task.date),
-                countdown_component(task.remaining_time, task.time_color),
-                spacing = "1",
-                align_items = "start"
             )
         ),
         rx.table.cell(task.assigned_to),
@@ -545,10 +544,10 @@ def show_item(task: Task):
                 ),
                 rx.cond(
                     (State.current_user != None) & (State.current_user.role == "Manager"),
-            rx.button(
-                "Delete",
-                color_scheme="red",
-                size="2",
+                    rx.button(
+                        "Delete",
+                        color_scheme="red",
+                        size="2",
                         on_click=lambda: State.delete_item(task.id),
                     ),
                 ),
